@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice PDF Processor</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 40px;
+        max-width: 850px;
+    }
+    h1 { margin-bottom: 8px; }
+    .note {
+        background: #eef4fb;
+        border-left: 4px solid #1f4e79;
+        padding: 12px 16px;
+        margin: 20px 0;
+    }
+    .section {
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 18px;
+        margin: 18px 0;
+    }
+    label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 8px;
+    }
+    input[type="file"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+    }
+    button {
+        background: #1f4e79;
+        color: white;
+        border: 0;
+        border-radius: 5px;
+        padding: 12px 20px;
+        font-size: 15px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+    button:disabled {
+        background: #999;
+        cursor: not-allowed;
+    }
+    #status {
+        margin-top: 20px;
+        white-space: pre-wrap;
+        font-family: Consolas, monospace;
+    }
+</style>
+</head>
+<body>
+
+<h1>Invoice PDF Processor</h1>
+<p>Browser-only test version</p>
+
+<div class="note">
+    <strong>Privacy:</strong> The selected PDFs are processed in this browser.
+    They are not uploaded to this GitHub Pages site or to a PDF service.
+</div>
+
+<div class="section">
+    <label for="invoiceFile">1. Select the invoice PDF</label>
+    <input id="invoiceFile" type="file" accept="application/pdf,.pdf">
+</div>
+
+<div class="section">
+    <label for="receiptFile">2. Select the payment receipt PDF</label>
+    <input id="receiptFile" type="file" accept="application/pdf,.pdf">
+</div>
+
+<div class="section">
+    <button id="processButton">PROCESS PDF</button>
+    <div id="status"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+<script>
+const invoiceInput = document.getElementById("invoiceFile");
+const receiptInput = document.getElementById("receiptFile");
+const processButton = document.getElementById("processButton");
+const statusBox = document.getElementById("status");
+
+function setStatus(message) {
+    statusBox.textContent = message;
+}
+
+processButton.addEventListener("click", async () => {
+    const invoiceFile = invoiceInput.files[0];
+    const receiptFile = receiptInput.files[0];
+
+    if (!invoiceFile) {
+        setStatus("Please select the invoice PDF.");
+        return;
+    }
+
+    if (!receiptFile) {
+        setStatus("Please select the payment receipt PDF.");
+        return;
+    }
+
+    try {
+        processButton.disabled = true;
+        setStatus("Reading PDFs...");
+
+        const invoiceBytes = await invoiceFile.arrayBuffer();
+        const receiptBytes = await receiptFile.arrayBuffer();
+
+        const invoicePdf = await PDFLib.PDFDocument.load(invoiceBytes);
+        const receiptPdf = await PDFLib.PDFDocument.load(receiptBytes);
+
+        const invoicePageCount = invoicePdf.getPageCount();
+        const receiptPageCount = receiptPdf.getPageCount();
+
+        // Business rule:
+        // - Invoice 1-4 pages: keep the entire invoice.
+        // - Invoice over 4 pages: keep only the first 4 pages.
+        const invoicePagesToKeep = Math.min(invoicePageCount, 4);
+
+        const outputPdf = await PDFLib.PDFDocument.create();
+
+        if (invoicePagesToKeep > 0) {
+            const invoicePages = await outputPdf.copyPages(
+                invoicePdf,
+                Array.from({ length: invoicePagesToKeep }, (_, i) => i)
+            );
+            invoicePages.forEach(page => outputPdf.addPage(page));
+        }
+
+        if (receiptPageCount > 0) {
+            const receiptPages = await outputPdf.copyPages(
+                receiptPdf,
+                Array.from({ length: receiptPageCount }, (_, i) => i)
+            );
+            receiptPages.forEach(page => outputPdf.addPage(page));
+        }
+
+        const outputBytes = await outputPdf.save();
+
+        // First test version: preserve the invoice filename and add a suffix.
+        const originalName = invoiceFile.name.replace(/\.pdf$/i, "");
+        const outputName = originalName + " - Processed.pdf";
+
+        const blob = new Blob([outputBytes], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = outputName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+        setStatus(
+            "SUCCESS\n\n" +
+            "Invoice pages in original: " + invoicePageCount + "\n" +
+            "Invoice pages kept: " + invoicePagesToKeep + "\n" +
+            "Payment receipt pages appended: " + receiptPageCount + "\n" +
+            "Output pages: " + (invoicePagesToKeep + receiptPageCount) + "\n\n" +
+            "Downloaded as:\n" + outputName
+        );
+
+    } catch (error) {
+        console.error(error);
+        setStatus(
+            "ERROR\n\n" +
+            (error && error.message ? error.message : String(error))
+        );
+    } finally {
+        processButton.disabled = false;
+    }
+});
+</script>
+
+</body>
+</html>
